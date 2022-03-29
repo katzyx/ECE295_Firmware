@@ -312,7 +312,6 @@ typedef struct {
   uint32_t pllb_freq;              //!< Phase-locked loop B frequency
 } si5351Config_t;
 
-
 /*!
  * GENERIC ERRORS                                         0x0000 .. 0x00FF
  *

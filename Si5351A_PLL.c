@@ -2,7 +2,7 @@
  * Si5351A_PLL.c
  *
  * Created: 2021-10-02 3:12:12 PM
- * Author: StewartPearson
+ * Author: Stewart Pearson
  * Adapted from: https://learn.adafruit.com/adafruit-si5351-clock-generator-breakout
  */ 
 
@@ -48,6 +48,37 @@ static void read8(uint8_t *reg, uint8_t *value)
 err_t Si5351A_setup(void) {
 
   /* Do the initialization */
+  /* Disable all outputs setting CLKx_DIS high */
+  ASSERT_STATUS(write8(SI5351_REGISTER_3_OUTPUT_ENABLE_CONTROL, 0xFF)); // register 3: output enable control
+  /* REGISTER 3: Output Enable Control
+      1 = disable CLKx output
+  */
+
+  /* Power down all output drivers */
+  ASSERT_STATUS(write8(SI5351_REGISTER_16_CLK0_CONTROL, 0x80));
+  ASSERT_STATUS(write8(SI5351_REGISTER_17_CLK1_CONTROL, 0x80));
+  ASSERT_STATUS(write8(SI5351_REGISTER_18_CLK2_CONTROL, 0x80));
+  ASSERT_STATUS(write8(SI5351_REGISTER_19_CLK3_CONTROL, 0x80));
+  ASSERT_STATUS(write8(SI5351_REGISTER_20_CLK4_CONTROL, 0x80));
+  ASSERT_STATUS(write8(SI5351_REGISTER_21_CLK5_CONTROL, 0x80));
+  ASSERT_STATUS(write8(SI5351_REGISTER_22_CLK6_CONTROL, 0x80));
+  ASSERT_STATUS(write8(SI5351_REGISTER_23_CLK7_CONTROL, 0x80));
+  /* 0x80 = 0b10100000
+     REGISTER 16-23:
+      bit 7 = CLKx Power Down   --> 1 = powered down
+      bit 5 = MSx Source Select --> 1 - select PLLB for MultiSynthx
+  */
+
+  /* Set the load capacitance for the XTAL */
+  ASSERT_STATUS(write8(SI5351_REGISTER_183_CRYSTAL_INTERNAL_LOAD_CAPACITANCE, Si5351_crystalLoad));
+  /* REGISTER 183: Crystal Internal Load Capacitance
+     bits 7-6: internal load capciatance for crystal
+       00 - reserved (do not select)
+       01 - CL = 6 pF
+       10 - CL = 8 pF
+       11 - CL = 10 pF (default)
+     bits 5-0: reserved, should be written 0b010010
+  */
 
   /* Reset the PLL config fields just in case we call init again */
   Si5351_plla_configured = false;
@@ -60,7 +91,6 @@ err_t Si5351A_setup(void) {
 
   return ERROR_NONE;
 }
-
 
 /**************************************************************************/
 /*!
@@ -106,9 +136,35 @@ err_t setupPLLInt(si5351PLL_t pll, uint8_t mult) {
     See: http://www.silabs.com/Support%20Documents/TechnicalDocs/AN619.pdf
 */
 /**************************************************************************/
-err_t setupPLL(si5351PLL_t pll, uint8_t mult, uint32_t num,
-                                uint32_t denom) {
+err_t setupPLL(si5351PLL_t pll, uint8_t mult, uint32_t num, uint32_t denom) {
+  uint32_t P1; // PLL config register P1
+  uint32_t P2; // PLL config register P2
+  uint32_t P3; // PLL config register P3
+
+  // Basic Validation - error check
+  ASSERT(Si5351_initialised, ERROR_DEVICENOTINITIALISED);
+  ASSERT((mult > 14) && (mult < 91), ERROR_INVALIDPARAMETER); // mult = 15..90
+  ASSERT(denom > 0, ERROR_INVALIDPARAMETER);                  // Avoid divide by zero
+  ASSERT(num <= 0xFFFFF, ERROR_INVALIDPARAMETER);             // 20-bit limit
+  ASSERT(denom <= 0xFFFFF, ERROR_INVALIDPARAMETER);           // 20-bit limit
   
+  /* Feedback Multisynth Divider Equation
+   *
+   * where: a = mult, b = num and c = denom
+   *
+   * P1 register is an 18-bit value using following formula:
+   *
+   * 	P1[17:0] = 128 * mult + floor(128*(num/denom)) - 512
+   *
+   * P2 register is a 20-bit value using the following formula:
+   *
+   * 	P2[19:0] = 128 * num - denom * floor(128*(num/denom))
+   *
+   * P3 register is a 20-bit value using the following formula:
+   *
+   * 	P3[19:0] = denom
+   */
+
 
   return ERROR_NONE;
 }
@@ -128,8 +184,9 @@ err_t setupPLL(si5351PLL_t pll, uint8_t mult, uint32_t num,
                       - SI5351_MULTISYNTH_DIV_8
 */
 /**************************************************************************/
-err_t setupMultisynthInt(uint8_t output, si5351PLL_t pllSource,
-                                          si5351MultisynthDiv_t div) {
+err_t setupMultisynthInt(uint8_t output, si5351PLL_t pllSource, si5351MultisynthDiv_t div) {
+
+
   return setupMultisynth(output, pllSource, div, 0, 1);
 }
 
@@ -195,9 +252,7 @@ err_t setupRdiv(uint8_t output, si5351RDiv_t div, uint32_t* freq) {
             used, but this isn't currently implemented in the driver.
 */
 /**************************************************************************/
-err_t setupMultisynth(uint8_t output, si5351PLL_t pllSource,
-                                       uint32_t div, uint32_t num,
-                                       uint32_t denom) {
+err_t setupMultisynth(uint8_t output, si5351PLL_t pllSource, uint32_t div, uint32_t num, uint32_t denom) {
 
   return ERROR_NONE;
 }
@@ -208,6 +263,7 @@ err_t setupMultisynth(uint8_t output, si5351PLL_t pllSource,
 */
 /**************************************************************************/
 err_t enableOutputs(bool enabled) {  
+
   return ERROR_NONE;
 }
 
