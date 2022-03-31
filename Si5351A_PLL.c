@@ -6,8 +6,7 @@
  * Adapted from: https://learn.adafruit.com/adafruit-si5351-clock-generator-breakout
  */ 
 
-#include "./Si5351A_PLL.h"
-
+#include "C:\Users\kathe\OneDrive\Documents\ECE 2021-2022\Winter Semester\ECE295\M3\ECE295_Firmware\Si5351A_PLL.h"
 
 // volatile global variables for the PLLs
 volatile bool Si5351_initialised = false;
@@ -165,6 +164,47 @@ err_t setupPLL(si5351PLL_t pll, uint8_t mult, uint32_t num, uint32_t denom) {
    * 	P3[19:0] = denom
    */
 
+  // Set main PLL config registers
+  if (num == 0){
+    // integer mode
+    P1 = 128 * mult - 512;
+    P2 = num;
+    P3 = denom;
+  } 
+  else {
+    /* Fractional mode */
+    P1 =(uint32_t)(128 * mult + floor(128 * ((float)num / (float)denom)) - 512);
+    P2 = (uint32_t)(128 * num - denom * floor(128 * ((float)num / (float)denom)));
+    P3 = denom;
+  }
+  
+  // Get the appropriate starting point for the PLL registers */
+  uint8_t baseaddr = (pll == SI5351_PLL_A ? 26 : 34);
+
+  /* The datasheet is a nightmare of typos and inconsistencies here! */
+  ASSERT_STATUS(write8(baseaddr, (P3 & 0x0000FF00) >> 8));
+  ASSERT_STATUS(write8(baseaddr + 1, (P3 & 0x000000FF)));
+  ASSERT_STATUS(write8(baseaddr + 2, (P1 & 0x00030000) >> 16));
+  ASSERT_STATUS(write8(baseaddr + 3, (P1 & 0x0000FF00) >> 8));
+  ASSERT_STATUS(write8(baseaddr + 4, (P1 & 0x000000FF)));
+  ASSERT_STATUS(write8(baseaddr + 5, ((P3 & 0x000F0000) >> 12) | ((P2 & 0x000F0000) >> 16)));
+  ASSERT_STATUS(write8(baseaddr + 6, (P2 & 0x0000FF00) >> 8));
+  ASSERT_STATUS(write8(baseaddr + 7, (P2 & 0x000000FF)));
+
+  /* Reset both PLLs */
+  ASSERT_STATUS(write8(SI5351_REGISTER_177_PLL_RESET, (1 << 7) | (1 << 5)));
+
+  /* Store the frequency settings for use with the Multisynth helper */
+  if (pll == SI5351_PLL_A) {
+    float fvco = Si5351_crystalFreq * (mult + ((float)num / (float)denom));
+    Si5351_plla_configured = true;
+    Si5351_plla_freq = (uint32_t)floor(fvco);
+  } 
+  else {
+    float fvco = Si5351_crystalFreq * (mult + ((float)num / (float)denom));
+    Si5351_pllb_configured = true;
+    Si5351_pllb_freq = (uint32_t)floor(fvco);
+  }
 
   return ERROR_NONE;
 }
@@ -185,8 +225,6 @@ err_t setupPLL(si5351PLL_t pll, uint8_t mult, uint32_t num, uint32_t denom) {
 */
 /**************************************************************************/
 err_t setupMultisynthInt(uint8_t output, si5351PLL_t pllSource, si5351MultisynthDiv_t div) {
-
-
   return setupMultisynth(output, pllSource, div, 0, 1);
 }
 
@@ -253,6 +291,110 @@ err_t setupRdiv(uint8_t output, si5351RDiv_t div, uint32_t* freq) {
 */
 /**************************************************************************/
 err_t setupMultisynth(uint8_t output, si5351PLL_t pllSource, uint32_t div, uint32_t num, uint32_t denom) {
+  uint32_t P1; /* Multisynth config register P1 */
+  uint32_t P2; /* Multisynth config register P2 */
+  uint32_t P3; /* Multisynth config register P3 */
+
+  /* Basic validation */
+  ASSERT(Si5351_initialised, ERROR_DEVICENOTINITIALISED);
+  ASSERT(output < 3, ERROR_INVALIDPARAMETER);       /* Channel range */
+  ASSERT(div > 3, ERROR_INVALIDPARAMETER);          /* Divider integer value */
+  ASSERT(div < 2049, ERROR_INVALIDPARAMETER);       /* Divider integer value */
+  ASSERT(denom > 0, ERROR_INVALIDPARAMETER);        /* Avoid divide by zero */
+  ASSERT(num <= 0xFFFFF, ERROR_INVALIDPARAMETER);   /* 20-bit limit */
+  ASSERT(denom <= 0xFFFFF, ERROR_INVALIDPARAMETER); /* 20-bit limit */
+
+  /* Make sure the requested PLL has been initialised */
+  if (pllSource == SI5351_PLL_A) {
+    ASSERT(Si5351_plla_configured, ERROR_INVALIDPARAMETER);
+  } 
+  else {
+    ASSERT(Si5351_pllb_configured, ERROR_INVALIDPARAMETER);
+  }
+
+  /* Output Multisynth Divider Equations
+   *
+   * where: a = div, b = num and c = denom
+   *
+   * P1 register is an 18-bit value using following formula:
+   *
+   * 	P1[17:0] = 128 * a + floor(128*(b/c)) - 512
+   *
+   * P2 register is a 20-bit value using the following formula:
+   *
+   * 	P2[19:0] = 128 * b - c * floor(128*(b/c))
+   *
+   * P3 register is a 20-bit value using the following formula:
+   *
+   * 	P3[19:0] = c
+   */
+
+  /* Set the main PLL config registers */
+  if (num == 0) {
+    /* Integer mode */
+    P1 = 128 * div - 512;
+    P2 = 0;
+    P3 = denom;
+  } else if (denom == 1) {
+    /* Fractional mode, simplified calculations */
+    P1 = 128 * div + 128 * num - 512;
+    P2 = 128 * num - 128;
+    P3 = 1;
+  } else {
+    /* Fractional mode */
+    P1 = (uint32_t)(128 * div + floor(128 * ((float)num / (float)denom)) - 512);
+    P2 = (uint32_t)(128 * num -
+                    denom * floor(128 * ((float)num / (float)denom)));
+    P3 = denom;
+  }
+
+  /* Get the appropriate starting point for the PLL registers */
+  uint8_t baseaddr = 0;
+  switch (output) {
+  case 0:
+    baseaddr = SI5351_REGISTER_42_MULTISYNTH0_PARAMETERS_1;
+    break;
+  case 1:
+    baseaddr = SI5351_REGISTER_50_MULTISYNTH1_PARAMETERS_1;
+    break;
+  case 2:
+    baseaddr = SI5351_REGISTER_58_MULTISYNTH2_PARAMETERS_1;
+    break;
+  }
+
+  /* Set the MSx config registers */
+  /* Burst mode: register address auto-increases */
+  uint8_t sendBuffer[9];
+  sendBuffer[0] = baseaddr;
+  sendBuffer[1] = (P3 & 0xFF00) >> 8;
+  sendBuffer[2] = P3 & 0xFF;
+  sendBuffer[3] = ((P1 & 0x30000) >> 16) | lastRdivValue[output];
+  sendBuffer[4] = (P1 & 0xFF00) >> 8;
+  sendBuffer[5] = P1 & 0xFF;
+  sendBuffer[6] = ((P3 & 0xF0000) >> 12) | ((P2 & 0xF0000) >> 16);
+  sendBuffer[7] = (P2 & 0xFF00) >> 8;
+  sendBuffer[8] = P2 & 0xFF;
+  ASSERT_STATUS(writeN(sendBuffer, 9));
+
+  /* Configure the clk control and enable the output */
+  /* TODO: Check if the clk control byte needs to be updated. */
+  uint8_t clkControlReg = 0x0F; /* 8mA drive strength, MS0 as CLK0 source, Clock
+                                   not inverted, powered up */
+  if (pllSource == SI5351_PLL_B)
+    clkControlReg |= (1 << 5); /* Uses PLLB */
+  if (num == 0)
+    clkControlReg |= (1 << 6); /* Integer mode */
+  switch (output) {
+  case 0:
+    ASSERT_STATUS(write8(SI5351_REGISTER_16_CLK0_CONTROL, clkControlReg));
+    break;
+  case 1:
+    ASSERT_STATUS(write8(SI5351_REGISTER_17_CLK1_CONTROL, clkControlReg));
+    break;
+  case 2:
+    ASSERT_STATUS(write8(SI5351_REGISTER_18_CLK2_CONTROL, clkControlReg));
+    break;
+  }
 
   return ERROR_NONE;
 }
@@ -263,10 +405,16 @@ err_t setupMultisynth(uint8_t output, si5351PLL_t pllSource, uint32_t div, uint3
 */
 /**************************************************************************/
 err_t enableOutputs(bool enabled) {  
+  /* Make sure we've called init first */
+  ASSERT(Si5351_initialised, ERROR_DEVICENOTINITIALISED);
+
+  /* Enabled desired outputs (see Register 3) */
+  ASSERT_STATUS(
+      write8(SI5351_REGISTER_3_OUTPUT_ENABLE_CONTROL, enabled ? 0x00 : 0xFF));
+
 
   return ERROR_NONE;
 }
-
 
 /**************************************************************************/
 /*!
@@ -376,4 +524,41 @@ si5351RDiv_t select_r_div(uint32_t *freq)
 	si5351RDiv_t r_div = SI5351_R_DIV_1;
 
 	return r_div;
+}
+
+/**************************************************************************/
+/*!
+    @brief  Writes a register and an 8 bit value over I2C
+*/
+/**************************************************************************/
+err_t write8(uint8_t reg, uint8_t value) {
+  uint8_t buffer[2] = {reg, value};
+  if (i2c_dev->write(buffer, 2)) {
+    return ERROR_NONE;
+  } 
+  else {
+    return ERROR_I2C_TRANSACTION;
+  }
+}
+
+err_t :writeN(uint8_t *data, uint8_t n) {
+  if (i2c_dev->write(data, n)) {
+    return ERROR_NONE;
+  } 
+  else {
+    return ERROR_I2C_TRANSACTION;
+  }
+}
+
+/**************************************************************************/
+/*!
+    @brief  Reads an 8 bit value over I2C
+*/
+/**************************************************************************/
+err_t read8(uint8_t reg, uint8_t *value) {
+  if (i2c_dev->write_then_read(&reg, 1, value, 1)) {
+    return ERROR_NONE;
+  } else {
+    return ERROR_I2C_TRANSACTION;
+  }
 }
