@@ -2,11 +2,11 @@
  * Si5351A_PLL.c
  *
  * Created: 2021-10-02 3:12:12 PM
- * Author: Stewart Pearson
+ * Author: Stewart Pearson, Katherine Zhang
  * Adapted from: https://learn.adafruit.com/adafruit-si5351-clock-generator-breakout
  */ 
 
-#include "C:/Users/kathe/OneDrive/Documents/ECE 2021-2022/Winter Semester/ECE295/M3/ECE295_Firmware/Si5351A_PLL.h"
+#include "Si5351A_PLL.h"
 
 // volatile global variables for the PLLs
 volatile bool Si5351_initialised = false;
