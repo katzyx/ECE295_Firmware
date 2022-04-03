@@ -12,9 +12,9 @@
 
 #include <avr/io.h>
 #include <math.h>
-#include "C:/Users/kathe/OneDrive/Documents/ECE 2021-2022/Winter Semester/ECE295/M3/ECE295_Firmware/twi/twi_master.h"
+#include "twi_master.h"
 
-#include "./asserts.h"
+#include "asserts.h"
 
 #define SI5351_ADDRESS (0x60) // Assumes ADDR pin = low // i2c address from datasheet 110_0000
 #define SI5351_READBIT (0x01)
