@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "si5351a_pll.h": "c",
+        "math.h": "c",
+        "twi_master.h": "c"
+    }
+}

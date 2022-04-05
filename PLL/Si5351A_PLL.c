@@ -8,6 +8,24 @@
 
 #include "Si5351A_PLL.h"
 
+// Function prototypes:
+static void write8(uint8_t reg, uint8_t value); // DONE
+static void writeN(uint8_t *data, uint8_t n); // DONE
+static void read8(uint8_t *reg, uint8_t *value); // DONE
+err_t Si5351A_setup(void); // DONE
+err_t setupPLLInt(si5351PLL_t pll, uint8_t mult); // DONE
+err_t setupPLL(si5351PLL_t pll, uint8_t mult, uint32_t num, uint32_t denom); // DONE
+err_t setupMultisynthInt(uint8_t output, si5351PLL_t pllSource, si5351MultisynthDiv_t div); // DONE
+err_t setupRdiv(uint8_t output, si5351RDiv_t div, uint32_t* freq);
+err_t setupMultisynth(uint8_t output, si5351PLL_t pllSource, uint32_t div, uint32_t num, uint32_t denom); // DONE
+err_t enableOutputs(bool enabled); // DONE
+err_t setPhaseOffset(uint8_t output, uint8_t phase_off); // NOT USED
+uint32_t pll_calc(si5351PLL_t pll, uint32_t freq, int32_t correction, uint8_t vcxo); // NOT USED
+uint32_t multisynth_calc(uint8_t output, si5351PLL_t pllSource,	uint32_t freq, uint32_t pll_freq); // NOT USED
+err_t setLOF1(uint32_t freq, si5351PLL_t pllSource); // DONE
+err_t setLOF2(uint32_t freq, si5351PLL_t pllSource); // NOT USED
+si5351RDiv_t select_r_div(uint32_t *freq); // NOT USED
+
 // volatile global variables for the PLLs
 volatile bool Si5351_initialised = false;
 volatile si5351CrystalFreq_t Si5351_crystalFreq = SI5351_CRYSTAL_FREQ_25MHZ;
@@ -17,7 +35,8 @@ volatile bool Si5351_plla_configured = false;
 volatile uint32_t Si5351_plla_freq = 0;
 volatile bool Si5351_pllb_configured = false;
 volatile uint32_t Si5351_pllb_freq = 0;
-volatile uint8_t Si5351_lastRdivValue[3] = {0,0,0};
+volatile uint8_t Si5351_lastRdivValue[3] = {0,0,0}
+
 
 // I2C commands (use your own if you'd prefer)
 static void write8(uint8_t reg, uint8_t value)
@@ -229,7 +248,27 @@ err_t setupMultisynthInt(uint8_t output, si5351PLL_t pllSource, si5351Multisynth
 }
 
 err_t setupRdiv(uint8_t output, si5351RDiv_t div, uint32_t* freq) {
- 
+  ASSERT(output < 3, ERROR_INVALIDPARAMETER); /* Channel range */
+
+  uint8_t Rreg, regval;
+
+  if (output == 0)
+    Rreg = SI5351_REGISTER_44_MULTISYNTH0_PARAMETERS_3;
+  if (output == 1)
+    Rreg = SI5351_REGISTER_52_MULTISYNTH1_PARAMETERS_3;
+  if (output == 2)
+    Rreg = SI5351_REGISTER_60_MULTISYNTH2_PARAMETERS_3;
+
+  read8(Rreg, &regval);
+
+  regval &= 0x0F;
+  uint8_t divider = div;
+  divider &= 0x07;
+  divider <<= 4;
+  regval |= divider;
+  lastRdivValue[output] = divider;
+
+
   return ERROR_NONE;
 }
 
@@ -409,10 +448,8 @@ err_t enableOutputs(bool enabled) {
   ASSERT(Si5351_initialised, ERROR_DEVICENOTINITIALISED);
 
   /* Enabled desired outputs (see Register 3) */
-  ASSERT_STATUS(
-      write8(SI5351_REGISTER_3_OUTPUT_ENABLE_CONTROL, enabled ? 0x00 : 0xFF));
-
-
+  ASSERT_STATUS(write8(SI5351_REGISTER_3_OUTPUT_ENABLE_CONTROL, enabled ? 0x00 : 0xFF));
+  
   return ERROR_NONE;
 }
 
@@ -429,14 +466,14 @@ err_t enableOutputs(bool enabled) {
 */
 /**************************************************************************/
 err_t setPhaseOffset(uint8_t output, uint8_t phase_off) {
-	
-	 return ERROR_NONE;
+  phase_off = 90;
+  return setPhaseOffset(output, phase_off);
 };
 
 
 /**************************************************************************/
 /*!
-    @brief  Calculates the pll frequency for the given freq
+  @brief  Calculates the pll frequency for the given freq
 
 	@param  pll:  choose pll A or B  
 	@param  freq: pll frequency to set
@@ -445,9 +482,9 @@ err_t setPhaseOffset(uint8_t output, uint8_t phase_off) {
 	@param  vxco:    voltage controlled oscillator
 */
 /**************************************************************************/
-uint32_t pll_calc(si5351PLL_t pll, uint32_t freq, int32_t correction, uint8_t vcxo)
-{
-	freq=0;
+uint32_t pll_calc(si5351PLL_t pll, uint32_t freq, int32_t correction, uint8_t vcxo) {
+	
+  freq = 0;
 	
 	return freq;
 }
@@ -462,40 +499,92 @@ uint32_t pll_calc(si5351PLL_t pll, uint32_t freq, int32_t correction, uint8_t vc
     @param  pll_freq	The PLL frequency
 */
 /**************************************************************************/
-uint32_t multisynth_calc(uint8_t output, si5351PLL_t pllSource,	uint32_t freq, uint32_t pll_freq)
-{
-	freq=0;
+uint32_t multisynth_calc(uint8_t output, si5351PLL_t pllSource,	uint32_t freq, uint32_t pll_freq) {
+	freq = 0;
 	
 	return freq;
 }
 
 /**************************************************************************/
 /*!
-    @brief  Configures the Multisynth divider and PLL to output a desired 
-			frequency on outputs 0 and 1 (90 deg offset). 
+  @brief  Configures the Multisynth divider and PLL to output a desired 
+      		frequency on outputs 0 and 1 (90 deg offset). 
 
 	@param  freq	The desired frequency
 	@param  pllSource	The PLL you would like to use for this frequency (A/B)
+
+  Set CLK0 output ON and to the specified frequency
+   - frequency in range 1MHs to 150 MHz
+   - ex: setLOF1(10000000); sets output CLK0 to 10MHz
+
+  Sets up PLL A and MultiSynth 0 and procudes output on CLK0
+
 */
 /**************************************************************************/
-err_t setLOF1(uint32_t freq, si5351PLL_t pllSource) 
-{	
-	uint32_t pll_freq=0;
-	uint32_t correction =0;
-	uint8_t vxco=0;
+err_t setLOF1(uint32_t freq, si5351PLL_t pllSource) {	
+	/* uint32_t pll_freq = 0;
+	uint32_t correction = 0;
+	uint8_t vxco = 0;
 	uint32_t phase_off = 0;
 	si5351RDiv_t r_div = SI5351_R_DIV_1;  // Rdiv may be needed for freqs<500kHz.
-	
-	// Get PLL frequency for a given output frequency. Also set appropriate
-	// multisynth registers
-	pll_freq=multisynth_calc(0,pllSource,freq,0);
+
+	// Get PLL frequency for a given output frequency. Also set appropriate multisynth registers
+	pll_freq = multisynth_calc(0,pllSource,freq,0);
 	multisynth_calc(1,pllSource,freq,0);
+
 	// Set phase offset for the other output.
-	setPhaseOffset(1,phase_off);
+	setPhaseOffset(1, phase_off);
 	
-	// Program PLL registers for required pll_freq as given by the multisynth
-	// calculations above. Enable the outputs when you're done.
-	pll_calc(pllSource,pll_freq,correction,vxco);
+	// Program PLL registers for required pll_freq as given by the multisynth calculations above. 
+  // Enable the outputs when you're done.
+	pll_calc(pllSource, pll_freq, correction, vxco); */
+
+  uint32_t pll_freq;
+  uint32_t xtal_freq = SI5351_XTAL_FREQ;
+  uint32_t l;
+  float f;
+  uint8_t mult;
+  uint32_t num;
+  uint32_t denom;
+  uint32_t divider;
+
+  // calculate divistion ratio: 900 000 000 is the mex internal
+  // PLL frequency: 900MHz
+  divider = 900000000 / freq;
+
+  // ensure an even integer division ratio
+  if (divider % 2)
+    divider--;
+  
+  // calclate pll frequency: divider * desired output frequency
+  pll_freq = divider * freq;
+  // determine multiplier to get to required frequency
+  mult = pll_freq / xtal_freq; // mult is integer that must be in range 15-90
+  l = pll_freq % xtal_freq;
+  f = l;
+  f *= = 1048575;
+  f /= xtal_freq;
+  // actual multiplier is mult + num/denom
+  num = f;  // num and denom are fractional parts, each is 20 bits (range 0-1048575)
+  denom = 1048575; // set denom to maximum
+
+  // set PLL A with calculated multiplicatino ratio
+  setupPLL(SI5351_PLL_A, mult, num, denom);
+
+  // set up mutlisynth divider 0 with calculated divider
+  // final R division stage can divie by a power of 2 from 1-128
+  // represented by constats SI5351_R_DIV_1, SI5351_R_DIV_128
+  // to output frequencies below 1MHz, must use final R division stage
+  setupMultisynth(SI5351_REGISTER_42_MULTISYNTH0_PARAMETERS_1, SI5351_PLL_A, divider, num, denom);
+
+  // reset the pll causes a glitch in output
+  // for small changes to the parameters, don't need to reset PLL and there is no glitch
+  tw_master_transmit(SI5351_REGISTER_177_PLL_RESET, 0xA0, 1, false);
+  
+  // switch on CLK0 output (0x4F) and set multisynth0 input to be PLL A
+  tw_master_transmit(SI5351_REGISTER_16_CLK0_CONTROL, 0x4F | SI5351_PLL_A, 1, false);
+
+  return ERROR_NONE;
 }
 /**************************************************************************/
 /*!
@@ -506,8 +595,7 @@ err_t setLOF1(uint32_t freq, si5351PLL_t pllSource)
 	@param  pllSource	The PLL you would like to use for this frequency
 */
 /**************************************************************************/
-err_t setLOF2(uint32_t freq, si5351PLL_t pllSource) 
-{
+err_t setLOF2(uint32_t freq, si5351PLL_t pllSource) {
 	return ERROR_NONE;
 }
 
@@ -519,46 +607,8 @@ err_t setLOF2(uint32_t freq, si5351PLL_t pllSource)
     @param  freq: the frequency you're aiming for.
 */
 /**************************************************************************/
-si5351RDiv_t select_r_div(uint32_t *freq)
-{
+si5351RDiv_t select_r_div(uint32_t *freq) {
 	si5351RDiv_t r_div = SI5351_R_DIV_1;
 
 	return r_div;
-}
-
-/**************************************************************************/
-/*!
-    @brief  Writes a register and an 8 bit value over I2C
-*/
-/**************************************************************************/
-err_t write8(uint8_t reg, uint8_t value) {
-  uint8_t buffer[2] = {reg, value};
-  if (i2c_dev->write(buffer, 2)) {
-    return ERROR_NONE;
-  } 
-  else {
-    return ERROR_I2C_TRANSACTION;
-  }
-}
-
-err_t :writeN(uint8_t *data, uint8_t n) {
-  if (i2c_dev->write(data, n)) {
-    return ERROR_NONE;
-  } 
-  else {
-    return ERROR_I2C_TRANSACTION;
-  }
-}
-
-/**************************************************************************/
-/*!
-    @brief  Reads an 8 bit value over I2C
-*/
-/**************************************************************************/
-err_t read8(uint8_t reg, uint8_t *value) {
-  if (i2c_dev->write_then_read(&reg, 1, value, 1)) {
-    return ERROR_NONE;
-  } else {
-    return ERROR_I2C_TRANSACTION;
-  }
 }
